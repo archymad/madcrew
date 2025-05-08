@@ -1,6 +1,6 @@
 # meta_crew/meta_agents.py
 
-from langchain.chat_models import ChatAnthropic
+from langchain_community.chat_models import ChatAnthropic
 
 class ProjectManager:
     def __init__(self):
