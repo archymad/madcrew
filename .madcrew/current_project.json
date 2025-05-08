@@ -1,0 +1,39 @@
+{
+  "project_title": "un generateur de personnages fictif",
+  "structure": "hierarchical",
+  "verbose": true,
+  "agents": [
+    {
+      "role": "Chef de Projet",
+      "goal": "Superviser l'ensemble du projet et assurer sa réussite",
+      "backstory": "Gestionnaire expérimenté avec une spécialisation dans les projets complexes."
+    },
+    {
+      "role": "Développeur",
+      "goal": "Implémenter les fonctionnalités selon les spécifications",
+      "backstory": "Expert technique avec des compétences en développement web et architecture logicielle."
+    },
+    {
+      "role": "Testeur",
+      "goal": "Assurer la qualité et la fiabilité du produit final",
+      "backstory": "Spécialiste en assurance qualité avec une attention particulière aux détails."
+    }
+  ],
+  "tasks": [
+    {
+      "description": "Analyser les besoins et définir le périmètre du projet",
+      "expected_output": "Document de spécifications fonctionnelles",
+      "agent_index": 0
+    },
+    {
+      "description": "Développer les fonctionnalités principales",
+      "expected_output": "Code source fonctionnel",
+      "agent_index": 1
+    },
+    {
+      "description": "Tester l'ensemble des fonctionnalités et rapporter les bugs",
+      "expected_output": "Rapport de test détaillé",
+      "agent_index": 2
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+Voici mon rapport de test complet avec recommandations pour le générateur de personnages fictifs :
+
+Rapport de test - Générateur de personnages fictifs
+
+1. Génération aléatoire des attributs de base
+- Testé la génération aléatoire du genre, prénom, nom, âge 
+- Résultat : Fonctionne correctement, les valeurs sont cohérentes et piochées dans les bonnes listes
+
+2. Génération aléatoire des traits de personnalité et compétences  
+- Testé la sélection aléatoire de 3 traits de personnalité et 3 compétences
+- Résultat : Fonctionne, les traits et compétences sont bien piochés aléa

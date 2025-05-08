@@ -1,0 +1,18 @@
+Rapport de test - Générateur de personnages fictifs
+
+Objectif : 
+Tester les fonctionnalités principales du générateur de personnages fictifs implémenté en JavaScript.
+
+Périmètre :
+- Génération aléatoire du genre, prénom, nom, âge, traits de personnalité et profession
+- Affichage formaté des informations du personnage via la méthode toString()
+
+Méthodologie :
+- Exécution de plusieurs générations de personnages
+- Vérification visuelle des résultats pour s'assurer de la cohérence et de la variété
+- Analyse du code source pour identifier d'éventuels bugs ou améliorations possibles
+
+Résultats des tests :
+
+Test 1 :
+Personnage généré : Marie Dubois est une femme de
