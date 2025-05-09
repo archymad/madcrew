@@ -90,13 +90,24 @@ def create_crew_exec_script(project_folder, project_title, project_mode="hierarc
         bool: True si la création est réussie, False sinon
     """
     try:
-        # Contenu du script crew_exec.py
-        script_content = f'''
+        # Chemin vers le modèle de fichier crew_exec.py
+        template_path = os.path.join("meta_crew", "templates", "crew_exec_template.py")
+        
+        # Si le template existe, l'utiliser, sinon utiliser le contenu par défaut
+        if os.path.exists(template_path):
+            with open(template_path, "r", encoding="utf-8") as f:
+                script_content = f.read()
+        else:
+            # Charger le contenu depuis le code intégré dans ce script
+            # C'est une version simplifiée, idéalement vous auriez un template complet
+            script_content = '''
 # generated_crews/{kebab_case(project_title)}/crew_exec.py
 
 import os
 import sys
 import datetime
+import json
+import re
 from dotenv import load_dotenv
 from langchain_anthropic import ChatAnthropic
 from crewai import Agent, Task, Crew, Process
@@ -106,9 +117,120 @@ root_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../.."))
 dotenv_path = os.path.join(root_dir, ".env")
 load_dotenv(dotenv_path)
 
+class ArtifactManager:
+    """Gestionnaire d'artefacts pour stocker les codes et documents complets."""
+    
+    def __init__(self, project_name):
+        """Initialise le gestionnaire d'artefacts avec un nom de projet."""
+        self.project_dir = os.path.dirname(os.path.abspath(__file__))
+        self.artifacts_dir = os.path.join(self.project_dir, "artifacts")
+        self.code_dir = os.path.join(self.artifacts_dir, "code")
+        self.docs_dir = os.path.join(self.artifacts_dir, "docs")
+        self.tests_dir = os.path.join(self.artifacts_dir, "tests")
+        
+        # Création des répertoires nécessaires
+        for directory in [self.artifacts_dir, self.code_dir, self.docs_dir, self.tests_dir]:
+            os.makedirs(directory, exist_ok=True)
+        
+        self.project_name = project_name
+        
+    def save_code(self, filename, content, language="python"):
+        """Sauvegarde un fichier de code complet."""
+        filepath = os.path.join(self.code_dir, filename)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"✅ Code sauvegardé dans {filepath}")
+        return filepath
+        
+    def save_document(self, filename, content):
+        """Sauvegarde un document."""
+        filepath = os.path.join(self.docs_dir, filename)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"📄 Document sauvegardé dans {filepath}")
+        return filepath
+        
+    def save_test(self, filename, content):
+        """Sauvegarde un fichier de test."""
+        filepath = os.path.join(self.tests_dir, filename)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(content)
+        print(f"🧪 Test sauvegardé dans {filepath}")
+        return filepath
+        
+    def list_artifacts(self):
+        """Liste tous les artefacts créés."""
+        artifacts = []
+        for root, _, files in os.walk(self.artifacts_dir):
+            for file in files:
+                rel_path = os.path.relpath(os.path.join(root, file), self.artifacts_dir)
+                artifacts.append(rel_path)
+        return artifacts
+
+def extract_code_from_response(response_text):
+    """
+    Extrait le code source des réponses des agents.
+    
+    Args:
+        response_text (str): Texte complet de la réponse
+    
+    Returns:
+        dict: Dictionnaire des fichiers avec leur code source
+    """
+    code_files = {}
+    
+    # Recherche de blocs de code avec indication de langage
+    code_blocks = re.finditer(r'```(?:python|javascript|java|html|css|c\+\+|php|)?\s*(.*?)```', response_text, re.DOTALL)
+    
+    for i, match in enumerate(code_blocks):
+        code = match.group(1).strip()
+        
+        # Rechercher un nom de fichier potentiel avant le bloc de code
+        file_name_match = re.search(r'(?:fichier|file):\s*[\'"]?([a-zA-Z0-9_\-\.]+\.[a-zA-Z0-9]+)[\'"]?', 
+                                   response_text[:match.start()], re.IGNORECASE)
+        
+        if file_name_match:
+            filename = file_name_match.group(1)
+        else:
+            # Essayer de déduire le nom du fichier à partir du contenu du code
+            if "class Character" in code and ".py" not in code:
+                filename = "character.py"
+            elif "def generate" in code and ".py" not in code:
+                filename = "generator.py"
+            elif "import React" in code:
+                filename = "app.jsx"
+            elif "<html" in code:
+                filename = "index.html"
+            elif "body {" in code:
+                filename = "style.css"
+            else:
+                filename = f"code_block_{i+1}.py"
+        
+        code_files[filename] = code
+    
+    return code_files
+
+def extract_test_report(response_text):
+    """
+    Extrait le rapport de test des réponses des agents.
+    
+    Args:
+        response_text (str): Texte complet de la réponse
+    
+    Returns:
+        str: Rapport de test formaté en markdown
+    """
+    # Recherche d'un rapport de test
+    test_report_match = re.search(r'Rapport de test.*?(?=```|$)', response_text, re.DOTALL | re.IGNORECASE)
+    
+    if test_report_match:
+        return f"# Rapport de test\\n\\n{test_report_match.group(0).strip()}"
+    
+    return None
+
 def exec_crew():
     """
-    Exécute une crew pour le développement du projet "{project_title}".
+    Exécute une crew pour le développement du projet {project_title}.
     Cette fonction inclut une boucle d'auto-évaluation qui permet jusqu'à 2 itérations.
     
     Returns:
@@ -125,6 +247,12 @@ def exec_crew():
     max_iterations = 2
     approved = False
     
+    # Nom du projet
+    project_name = "{project_title}"
+    
+    # Création du gestionnaire d'artefacts
+    artifact_manager = ArtifactManager(project_name)
+    
     # Création du répertoire logs s'il n'existe pas
     logs_dir = "logs"
     os.makedirs(logs_dir, exist_ok=True)
@@ -135,7 +263,8 @@ def exec_crew():
     # Initialisation du modèle LLM avec la clé API depuis les variables d'environnement
     llm = ChatAnthropic(
         model="claude-3-opus-20240229", 
-        temperature=0.4,
+        temperature=0.2,
+        max_tokens_to_sample=4000,
         anthropic_api_key=os.environ["ANTHROPIC_API_KEY"]
     )
     
@@ -143,7 +272,7 @@ def exec_crew():
         iteration_count += 1
         print(f"Démarrage de l'itération {{iteration_count}}/{{max_iterations}}")
         
-        # Création des agents
+        # Création des agents avec des instructions améliorées
         project_manager = Agent(
             role="Project Manager",
             goal="Superviser et coordonner l'ensemble du projet {project_title}",
@@ -154,8 +283,13 @@ def exec_crew():
         
         developer = Agent(
             role="Développeur",
-            goal="Implémenter les fonctionnalités selon les spécifications du projet {project_title}",
-            backstory="Un développeur expérimenté avec une expertise en architecture logicielle et développement web.",
+            goal="Implémenter des fichiers complets et fonctionnels pour le projet {project_title}",
+            backstory=(
+                "Un développeur expérimenté avec une expertise en architecture logicielle. "
+                "Votre mission est de produire du code complet, fonctionnel et bien documenté. "
+                "Pour chaque fichier que vous créez, assurez-vous qu'il est complet du début à la fin, "
+                "incluant toutes les importations, classes, méthodes et la documentation nécessaire."
+            ),
             llm=llm,
             verbose=True
         )
@@ -163,7 +297,12 @@ def exec_crew():
         tester = Agent(
             role="Testeur",
             goal="Assurer la qualité et la fiabilité du projet {project_title}",
-            backstory="Expert en assurance qualité qui cherche à garantir l'excellence des logiciels.",
+            backstory=(
+                "Expert en assurance qualité qui cherche à garantir l'excellence des logiciels. "
+                "Votre mission est de tester de manière exhaustive toutes les fonctionnalités, "
+                "de documenter les cas de test, les résultats et les recommandations d'amélioration "
+                "dans un format clair et complet. Incluez des exemples concrets avec les entrées et sorties attendues."
+            ),
             llm=llm,
             verbose=True
         )
@@ -171,42 +310,65 @@ def exec_crew():
         quality_controller = Agent(
             role="QualityController",
             goal="Évaluer la qualité globale du projet {project_title} et ses livrables",
-            backstory="Un expert en contrôle qualité avec une expérience approfondie dans l'évaluation de projets similaires.",
+            backstory=(
+                "Un expert en contrôle qualité avec une expérience approfondie dans l'évaluation de projets similaires. "
+                "Votre mission est d'examiner de manière critique tous les livrables, d'identifier les problèmes, "
+                "les non-conformités et de proposer des améliorations concrètes."
+            ),
             llm=llm,
             verbose=True
         )
         
-        # Création des tâches de développement et de test
+        # Instructions pour le développeur afin de créer des fichiers complets
+        dev_instructions = (
+            f"Implémentez les fonctionnalités de base du projet {project_title}. "
+            "Il est CRUCIAL que vous fournissiez du code COMPLET, du début à la fin, "
+            "sans aucune troncature ou section manquante. Votre réponse doit inclure :\\n\\n"
+            "1. Une analyse des besoins et une description de l'architecture choisie\\n"
+            "2. Le code source COMPLET pour CHAQUE fichier nécessaire, en précisant clairement "
+            "le nom de chaque fichier avant son contenu\\n"
+            "3. Une explication de l'implémentation et des instructions d'utilisation\\n\\n"
+            "IMPORTANT : Assurez-vous que chaque fichier de code contient toutes les importations, "
+            "toutes les définitions de classes/fonctions, et est prêt à être exécuté sans modification. "
+            "Ne tronquez JAMAIS le code avec des commentaires comme '# reste du code...' "
+            "ou des ellipses '...'."
+        )
+        
+        # Instructions pour le testeur afin de créer des rapports de test complets
+        test_instructions = (
+            f"Testez les fonctionnalités implémentées du projet {project_title}. "
+            "Il est CRUCIAL que vous fournissiez un rapport de test COMPLET et DÉTAILLÉ. "
+            "Votre réponse doit inclure :\\n\\n"
+            "1. Une description détaillée de la méthodologie de test\\n"
+            "2. Des cas de test spécifiques avec entrées et sorties attendues\\n"
+            "3. Les résultats obtenus pour CHAQUE test, avec des exemples concrets\\n"
+            "4. Une analyse des performances et des limites identifiées\\n"
+            "5. Des recommandations d'amélioration spécifiques\\n\\n"
+            "IMPORTANT : Incluez dans votre rapport au moins 3-5 exemples complets "
+            "de personnages générés avec toutes leurs caractéristiques."
+        )
+        
+        # Création des tâches de développement et de test avec les instructions améliorées
         dev_task = Task(
-            description="Implémenter les fonctionnalités de base du projet {project_title}",
-            expected_output="Code fonctionnel répondant aux exigences du projet",
+            description=dev_instructions,
+            expected_output="Code source complet et fonctionnel pour tous les fichiers du projet",
             agent=developer
         )
         
         test_task = Task(
-            description="Tester les fonctionnalités implémentées du projet {project_title}",
-            expected_output="Rapport de test complet avec recommandations",
+            description=test_instructions,
+            expected_output="Rapport de test complet avec exemples et recommandations",
             agent=tester
         )
         
         try:
             # Exécuter les tâches de développement et de test
-            if "{project_mode}" == "agile":
-                # Mode agile : les agents collaborent directement
-                dev_test_crew = Crew(
-                    agents=[developer, tester],
-                    tasks=[dev_task, test_task],
-                    process=Process.agile,
-                    verbose=True
-                )
-            else:
-                # Mode hiérarchique : manager délègue et supervise
-                dev_test_crew = Crew(
-                    agents=[developer, tester],
-                    tasks=[dev_task, test_task],
-                    process=Process.sequential,  # Sequential pour éviter les problèmes de délégation
-                    verbose=True
-                )
+            dev_test_crew = Crew(
+                agents=[developer, tester],
+                tasks=[dev_task, test_task],
+                process=Process.{project_mode},
+                verbose=True
+            )
             
             dev_test_results = dev_test_crew.kickoff()
             
@@ -216,6 +378,16 @@ def exec_crew():
                 "dev_results": str(dev_test_results),
                 "tasks": [dev_task, test_task]
             }})
+            
+            # Extraction et sauvegarde du code depuis les résultats
+            code_results = extract_code_from_response(str(dev_test_results))
+            for filename, code in code_results.items():
+                artifact_manager.save_code(filename, code)
+            
+            # Extraction et sauvegarde des résultats de test
+            test_report = extract_test_report(str(dev_test_results))
+            if test_report:
+                artifact_manager.save_document("test_report.md", test_report)
             
             # Écrire les résultats dans un fichier pour référence
             with open(os.path.join(logs_dir, f"iteration_{{iteration_count}}_results.txt"), "w", encoding="utf-8") as f:
@@ -229,15 +401,21 @@ def exec_crew():
             
             # Préparer la description de la tâche d'auto-évaluation avec les résultats précédents
             review_description = (
-                f"Examiner les livrables de l'itération {{iteration_count}} du projet {project_title} et évaluer si le projet répond aux exigences. "
-                f"S'il y a des problèmes majeurs, inclure le mot 'retry' dans votre réponse pour lancer une nouvelle itération.\\n\\n"
-                f"Voici les résultats de l'itération actuelle :\\n{{str(dev_test_results)[:1000]}}..."
+                f"Examiner les livrables de l'itération {{iteration_count}} du projet {project_title} "
+                f"et évaluer si le projet répond aux exigences. Votre rapport doit être COMPLET et DÉTAILLÉ. "
+                f"Analysez la qualité du code, la couverture des tests et la fonctionnalité globale. "
+                f"S'il y a des problèmes majeurs, incluez le mot 'retry' dans votre réponse. "
+                f"Si le projet est approuvé, expliquez clairement pourquoi.\\n\\n"
+                f"Voici les artefacts produits lors de cette itération :\\n"
+                f"{{json.dumps(artifact_manager.list_artifacts(), indent=2)}}\\n\\n"
+                f"Voici un aperçu des résultats de l'itération actuelle :\\n"
+                f"{{str(dev_test_results)[:2000]}}..."
             )
             
             # Créer la tâche d'auto-évaluation
             review_task = Task(
                 description=review_description,
-                expected_output="Rapport d'évaluation avec décision finale: approuvé ou retry",
+                expected_output="Rapport d'évaluation détaillé avec décision finale: approuvé ou retry",
                 agent=quality_controller
             )
             
@@ -256,6 +434,10 @@ def exec_crew():
                 # Stocker les résultats
                 all_results[-1]["review_results"] = str(review_results)
                 all_results[-1]["tasks"].append(review_task)
+                
+                # Sauvegarde du rapport d'évaluation
+                quality_report = str(review_results)
+                artifact_manager.save_document(f"quality_report_iteration_{{iteration_count}}.md", quality_report)
                 
                 # Écrire les résultats dans un fichier pour référence
                 with open(os.path.join(logs_dir, f"iteration_{{iteration_count}}_review.txt"), "w", encoding="utf-8") as f:
@@ -300,24 +482,29 @@ def exec_crew():
                 print(f"Nombre maximum d'itérations atteint ({{max_iterations}})")
     
     # Générer le fichier summary.md
-    generate_summary(all_results, iteration_count, [developer, tester, quality_controller], approved)
+    generate_summary(all_results, artifact_manager, iteration_count, [developer, tester, quality_controller], approved)
     
     return all_results
 
-def generate_summary(results, iterations, agents, approved):
+def generate_summary(results, artifact_manager, iterations, agents, approved):
     """
     Génère un fichier summary.md avec un récapitulatif des résultats
     
     Args:
         results (list): Liste des résultats des itérations
+        artifact_manager (ArtifactManager): Gestionnaire d'artefacts
         iterations (int): Nombre d'itérations effectuées
         agents (list): Liste des agents utilisés
         approved (bool): Indique si le projet a été approuvé
     """
+    project_name = artifact_manager.project_name
     timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
-    with open("summary.md", "w", encoding="utf-8") as f:
-        f.write(f"# Résumé du projet {project_title}\\n\\n")
+    # Liste des artefacts générés
+    artifacts = artifact_manager.list_artifacts()
+    
+    with open(os.path.join(artifact_manager.project_dir, "summary.md"), "w", encoding="utf-8") as f:
+        f.write(f"# Résumé du projet {{project_name}}\\n\\n")
         f.write(f"Date: {{timestamp}}\\n\\n")
         f.write(f"## Informations générales\\n\\n")
         f.write(f"- Nombre d'itérations: {{iterations}}\\n")
@@ -329,6 +516,14 @@ def generate_summary(results, iterations, agents, approved):
             f.write(f"- Objectif: {{agent.goal}}\\n")
             f.write(f"- Expérience: {{agent.backstory}}\\n\\n")
         
+        f.write(f"## Artefacts produits\\n\\n")
+        f.write("| Fichier | Type |\\n")
+        f.write("| ------ | ---- |\\n")
+        for artifact in artifacts:
+            artifact_type = "Code" if artifact.startswith("code/") else "Document" if artifact.startswith("docs/") else "Test"
+            f.write(f"| {{artifact}} | {{artifact_type}} |\\n")
+        f.write("\\n\\n")
+        
         f.write(f"## Tâches accomplies par itération\\n\\n")
         
         for iteration_data in results:
@@ -338,28 +533,10 @@ def generate_summary(results, iterations, agents, approved):
             f.write(f"### Itération {{iteration_num}}\\n\\n")
             
             for task in tasks:
-                short_description = task.description
+                short_description = task.description.split('\\n')[0]
                 f.write(f"#### {{short_description}}\\n")
                 f.write(f"- Agent responsable: {{task.agent.role}}\\n")
                 f.write(f"- Résultat attendu: {{task.expected_output}}\\n\\n")
-            
-            # Ajouter les résultats de développement
-            dev_results = iteration_data.get("dev_results", "")
-            if dev_results:
-                f.write("#### Résultats de développement et tests:\\n\\n")
-                f.write("```\\n")
-                # Pas de limitation de taille, résultats complets
-                f.write(dev_results + "\\n")
-                f.write("```\\n\\n")
-            
-            # Ajouter les résultats d'auto-évaluation
-            review_results = iteration_data.get("review_results", "")
-            if review_results:
-                f.write("#### Résultats de l'auto-évaluation:\\n\\n")
-                f.write("```\\n")
-                # Pas de limitation de taille, résultats complets
-                f.write(review_results + "\\n")
-                f.write("```\\n\\n")
         
         f.write(f"## Conclusion\\n\\n")
         if iterations == 1 and approved:
@@ -368,16 +545,44 @@ def generate_summary(results, iterations, agents, approved):
             f.write(f"Le projet a nécessité {{iterations}} itérations avant d'être approuvé. Des améliorations ont été apportées suite aux retours du contrôleur qualité.\\n")
         else:
             f.write(f"Le projet a atteint le nombre maximum d'itérations ({{iterations}}) sans être complètement approuvé. Des améliorations supplémentaires sont nécessaires.\\n")
+        
+        f.write("\\n## Instructions d'exécution\\n\\n")
+        
+        # Détecter automatiquement le type de projet et générer des instructions d'exécution
+        python_files = [f for f in artifacts if f.endswith('.py') and f.startswith('code/')]
+        js_files = [f for f in artifacts if f.endswith('.js') and f.startswith('code/')]
+        html_files = [f for f in artifacts if f.endswith('.html') and f.startswith('code/')]
+        
+        if python_files:
+            main_file = next((f for f in python_files if 'main' in f), python_files[0])
+            rel_path = os.path.join('artifacts', main_file)
+            f.write(f"Pour exécuter ce projet Python :\\n\\n")
+            f.write(f"```bash\\n")
+            f.write(f"cd {{project_name}}\\n")
+            f.write(f"python {{rel_path}}\\n")
+            f.write(f"```\\n\\n")
+        
+        if js_files and html_files:
+            f.write(f"Pour exécuter ce projet web :\\n\\n")
+            f.write(f"Ouvrez le fichier `artifacts/{{next(f for f in html_files)}}` dans votre navigateur.\\n\\n")
 
 if __name__ == "__main__":
     # Exécution directe pour les tests
     exec_crew()
 '''
         
-        # Remplacer le placeholder par le vrai mode du projet
+        # Remplacer les placeholders
+        script_content = script_content.replace("{project_title}", project_title)
         script_content = script_content.replace("{project_mode}", project_mode)
+        script_content = script_content.replace("{kebab_case(project_title)}", kebab_case(project_title))
         
-        # Écrire le fichier
+        # Créer les répertoires
+        artifacts_dir = os.path.join(project_folder, "artifacts")
+        os.makedirs(os.path.join(artifacts_dir, "code"), exist_ok=True)
+        os.makedirs(os.path.join(artifacts_dir, "docs"), exist_ok=True)
+        os.makedirs(os.path.join(artifacts_dir, "tests"), exist_ok=True)
+        
+        # Écrire le fichier crew_exec.py
         crew_exec_path = os.path.join(project_folder, "crew_exec.py")
         with open(crew_exec_path, "w", encoding="utf-8") as f:
             f.write(script_content)
@@ -563,6 +768,14 @@ def main():
     meta_agents.team_architect.goal = f"Concevoir l'équipe idéale d'agents pour réaliser le projet '{project_title}'"
     meta_agents.quality_controller.goal = f"Valider chaque livrable produit dans le cadre du projet '{project_title}'"
     
+    # Mettre à jour les paramètres du modèle LLM pour éviter les troncatures
+    meta_agents.llm = ChatAnthropic(
+        model="claude-3-opus-20240229", 
+        temperature=0.2,
+        max_tokens_to_sample=100000,
+        anthropic_api_key=os.environ.get("ANTHROPIC_API_KEY")
+    )
+    
     # Création du dossier logs pour la méta-crew s'il n'existe pas
     log_dir = "meta_crew/logs"
     os.makedirs(log_dir, exist_ok=True)
@@ -576,9 +789,15 @@ def main():
     
     # Tentative d'ajout d'une tâche de clarification en première position
     try:
-        # Créer une nouvelle tâche de clarification
+        # Créer une nouvelle tâche de clarification avec des instructions améliorées
         clarification_task = Task(
-            description=f"Clarifier les objectifs du projet intitulé '{project_title}'",
+            description=(
+                f"Clarifier les objectifs du projet intitulé '{project_title}'. "
+                f"Fournissez une description détaillée des fonctionnalités, besoins et contraintes. "
+                f"Ne pas tronquer vos réponses et être aussi exhaustif que possible. "
+                f"Structurez votre réponse clairement avec des sections et sous-sections. "
+                f"Soyez particulièrement attentif aux besoins fonctionnels et non-fonctionnels."
+            ),
             expected_output=f"Document détaillant les objectifs, contraintes et priorités du projet '{project_title}'",
             agent=meta_agents.strategic_planner
         )
